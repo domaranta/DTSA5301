@@ -1,0 +1,218 @@
+---
+title: "COVID-19"
+author: "Dominic Maranta"
+date: "2023-10-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)#library in all necessary libraries
+library(lubridate)
+
+```
+
+
+# COVID-19 Project
+
+## Introduction
+
+This project will examine data from the COVID-19 pandemic. The data includes results from around the world and in the US. This project will primarily focus on the US data, both the number of cases and deaths by area. I will explore the data, summarize it, and provide some visuals along with analysis of this data. This project hopes to shine some light on specific areas within the United States and how there are differences around the country in the impacts of the COVID-19 pandemic. Our main questions are to examine the differences in rates of cases and deaths from COVID-19 across the country.
+
+
+## Data Import/Cleaning
+
+The first step is to clean the data after loading it in from GitHub. Below, you can see the steps for cleaning and organizing the data from global deaths, cases, and US deaths and cases. We will primarily use a merged set of the US data. Commented code can help guide through this process.
+
+```{r}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv", "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv") # read in URLs
+urls <- str_c(url_in, file_names)
+US_cases <- read_csv(urls[1])#these next 4 lines extract the url into a csv read
+US_deaths <- read_csv(urls[2])
+global_cases <- read_csv(urls[3])
+global_deaths <- read_csv(urls[4])
+
+US_cases <- US_cases %>% #format the US cases set
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>% #format the US deaths set
+  pivot_longer(cols = -(UID:Population),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+us <- US_cases %>%#join the cases and deaths into one table for the us
+  full_join(US_deaths)
+
+global_cases <- global_cases %>%#format the global cases set
+  pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+global_deaths <- global_deaths %>%#format the global deaths set
+  pivot_longer(cols = -c('Province/State', 'Country/Region', 'Lat', 'Long'),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+global <- global_cases %>%#join the global cases and deaths tables
+  full_join(global_deaths) %>%
+  rename(Country_Region = 'Country/Region',
+         Province_State = 'Province/State')%>%
+  mutate(date = mdy(date))
+
+
+
+
+us <- us %>% filter(cases > 0)#filter the us dataset for rows after Covid begins to show up
+global <- global %>% filter(cases > 0)#filter the global dataset for rows after Covid begins to show up
+```
+
+
+```{r}
+summary(us)#summary to confirm the formatting is correct
+summary(global)#summary to confirm the formatting is correct
+```
+##By State
+
+```{r}
+us_state <- us %>%#create a dataset containing the information by state and by day
+  group_by(Province_State, Country_Region, date)%>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            population = sum(Population)) %>%
+  mutate(deaths_per_100k = deaths*100000/population,
+         cases_per_100k = cases*100000/population)%>%
+  select(Province_State, Country_Region, date, 
+         cases, deaths, deaths_per_100k, cases_per_100k, population)%>%
+  ungroup()
+
+
+us_totals <- us_state %>%#create a us total data set which includes the number of cases and deaths by each state totaled. 
+  group_by(Province_State)%>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(population), 
+            cases_per_100k = 100000*cases/population,
+            deaths_per_100k = 100000*deaths/population)%>%
+  filter(cases>0, population>0)
+```
+
+
+## Analysis
+
+In this section we will analyze and visualize some aspects of the dataset, first off the rate of cases in each state.
+
+```{r}
+us_map <- map_data("state")#create the us map template
+
+us_map<- us_map%>%#format the map data
+  mutate(
+    region = str_to_title(region)
+  )
+
+map_setup <- merge(us_map, us_totals, by.x = "region", by.y = "Province_State", all.x = TRUE)#merge the map data with our COVID data
+
+ggplot() +#create a map showing the number of cases per 100k people by each state
+  geom_map(data = us_map, map = us_map,aes(x = long, y = lat, map_id = region), fill = "white", color = "white", size = 0.15) +
+  geom_map(data = map_setup,map = us_map, aes(fill = cases_per_100k, map_id = region))+
+  labs(title = "Cases per 100k People in the US", fill = "Cases per 100k") +
+  scale_fill_continuous(low = "white", high = "darkblue", guide = "colorbar")
+
+
+```
+
+Above, we can see a map of the number of COVID-19 cases per 100,000 people in each US state. It is evident right away there are some big differences in the number of cases per state. States with a darker blue had a higher rate of cases while lighter colors denote a lower rate. The states with some of the highest rates include Rhode Island, Utah, North Dakota and Kentucky. On the other side of things, states including Oregon, Maryland, and Maine have much lower rates of COVID-19 cases. Further analysis with population densities, health data, and demographics could be an interesting future project to explain some of the reasoning behind the differences in rates of cases we see. 
+
+```{r}
+ggplot() +#create a map telling us the deaths per 100k people by each state
+  geom_map(data = us_map, map = us_map,aes(x = long, y = lat, map_id = region), fill = "white", color = "white", size = 0.15) +
+  geom_map(data = map_setup,map = us_map, aes(fill = deaths_per_100k, map_id = region))+
+  labs(title = "Deaths per 100k People in the US", fill = "Deaths per 100k") +
+  scale_fill_continuous(low = "white", high = "darkred", guide = "colorbar")
+```
+
+Here, we look at a similar map, yet this time the number of deaths per 100,000 people in each US state. We can see the death rates are highest in many states in the Southeast, Arizona, Michigan, and West Virginia. Death rates are lowest in Vermont, Utah, Maine, and New Hampshire. A standard hypothesis would suggest the rate of cases would be directly related to the death rates, and generally these maps agree. One outlier to this rule is Utah having one of the higher case rates yet one of the lowest death rates in the country. Our analysis in the next sections will focus on the US as a whole and Utah.
+
+## State Total Regression analysis
+
+```{r}
+us_model <- lm(deaths_per_100k ~ cases_per_100k, us_totals)# create linear regression model for all us states
+
+us_totals %>%# graph this regression model
+  ggplot(aes(x = cases_per_100k, y = deaths_per_100k))+
+  geom_point(color="blue")+
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+
+summary(us_model)#examine the regression model
+
+```
+
+The above graphic and summary models the effect of the rate of cases on the rate of deaths. As suspected there is a linear trend with strong evidence(p<0.001) that as the rate of cases increases, so does the rate of deaths. This is a quite simple model due to the nature of our data, but an exploration with more information including many demographics would prove very interesting and insightful. Now, we will explore the potential anomaly in Utah that we saw in the maps above.
+
+
+## Utah Setup
+
+```{r}
+utah <- us %>%#create a summary set of Utah arranged by each county
+   filter(Province_State == "Utah") %>%
+  group_by(Admin2) %>%
+  summarize(
+    Population = sum(Population),
+    deaths = sum(deaths),
+    cases = sum(cases)) %>%
+  mutate(deaths_per_100k = deaths * 100000 / Population,
+         cases_per_100k = cases * 100000 / Population) %>%
+  select(Admin2, Population, cases, deaths, deaths_per_100k, cases_per_100k)%>%
+  filter(Population >0)
+```
+
+```{r}
+utah_model <- lm(deaths_per_100k ~ cases_per_100k, utah)#create a regression model for utah
+
+utah %>%#graph this linear regression model
+  ggplot(aes(x = cases_per_100k, y = deaths_per_100k))+
+  geom_point(color="blue")+
+  geom_smooth(method = "lm", se = FALSE, color = "red")
+
+summary(utah_model)#summarize the model
+```
+
+First, we filter our data set to take only Utah locations and then examine the points by county. We build a linear regression model to examine the relationship between rate of cases and rate of deaths just as we did above. We can see in the summary output and our graphic that the relationship is still there but it is just much less extreme than the US overall. While this still makes logical sense, it still seems like a very interesting case to examine further. Including more information such as demographics on the US as a whole and specific US states would likely shine more light on the COVID-19 pandemic across the US.
+
+## Bias
+
+Of course, there are always potential sources for bias in data and data analysis. In this data set, as the world adjusted to COVID-19, there were likely delays in reporting COVID-19 cases and potential missed cases in the reporting metrics. Additionally, those who tested positive at home may not have reported their case so we may be severely under counting the number of cases. This could differ vastly from state to state or around the world as different countries have different levels of reporting and infrastructure in place to support the pandemic response and recording. These facts alone could greatly skew our data and impact the results and graphics we produced and discussed above. This will always be the case with diseases but it is an important fact to keep in mind as we break down the results of this data.
+
+As for personal biases, I do not believe I impacted the results from this study as there were limited data cleaning choices to make and missing values where my opinions could warp the data science process. I hope my thoughts did not interfere with the results as I tried to make a non biased analysis of the data.
+
+## Summary
+
+Today, our analysis looked at the rate of cases and deaths across the US. We saw some of the vast differences across the US by state and examined the trend in the US as a whole and the outlier state of Utah to find the trend similar in both. Our analysis could be built on with more information from each state to draw quality insights. We explored the data set as a whole through the data science process, cleaning, organizing, visualizing, modeling, and drawing conclusions from this COVID-19 data.
+
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+
+
+
+
+
+
+
+

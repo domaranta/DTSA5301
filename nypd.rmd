@@ -1,0 +1,171 @@
+---
+title: "NYPD"
+author: "Dominic Maranta"
+date: "2023-10-03"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+# NYPD Shooting Dataset
+
+### Introduction
+
+This data analysis project will go through the data science project steps as an exploratory analysis of the NYPD historical shooting incidents data set. This project will first examine and clean the data set and then perfrom several analyses including visuals. This project will also examine possible data bias issues. 
+
+```{r}
+#library necessary packages
+library(tidyverse)
+library(tidyr)
+library(broom)
+library(ggmap)
+library(httr)
+library(rgdal)
+```
+## Reading in the Data
+
+```{r}
+nypd <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")#read in the data
+
+#summary(nypd)#summary of our data types
+```
+
+## Cleaning Data
+
+```{r}
+#head(nypd)
+
+nypd <- nypd %>%#factoring and creating correct data types
+  mutate(
+    INCIDENT_KEY = factor(INCIDENT_KEY),
+    OCCUR_DATE = as.Date(OCCUR_DATE, format="%m/%d/%Y"),
+    PRECINCT = factor(PRECINCT),
+    JURISDICTION_CODE = factor(JURISDICTION_CODE),
+    PERP_AGE_GROUP = factor(PERP_AGE_GROUP),
+    PERP_SEX = factor(PERP_SEX),
+    PERP_RACE = factor(PERP_RACE),
+    VIC_AGE_GROUP = factor(VIC_AGE_GROUP),
+    VIC_SEX = factor(VIC_SEX),
+    VIC_RACE = factor(VIC_RACE)
+  )
+
+nypd <- nypd %>%#keeping relevant variables
+  select(
+    INCIDENT_KEY, OCCUR_DATE, OCCUR_TIME, PRECINCT, JURISDICTION_CODE, STATISTICAL_MURDER_FLAG, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, VIC_AGE_GROUP, VIC_SEX, VIC_RACE, Latitude, Longitude
+  )
+head(nypd)#these two lines confirm our data was correctly formatted
+summary(nypd)
+
+```
+Most variables contain at least a few missing values. Missing values will not be filled in and will be omitted for each specific variable used in a specific analysis question. Most variables of interest in the dataset do not have more than a few missing values and are comparatively small to the large dataset so they are not of concern for our analysis and visuals. 
+
+
+## Visualizing and Analyzing
+
+### Crime Map
+
+```{r}
+nypd_coords <- data.frame(cbind(nypd$Longitude, nypd$Latitude, nypd$STATISTICAL_MURDER_FLAG))
+nypd_coords <- nypd_coords %>% drop_na()
+nypd_coords <- nypd_coords %>%
+  mutate(
+    X3 = as.logical(X3)
+  )%>% drop_na()#create a coordinate system to be used in map analysis and visuals, also excluding the missing values
+
+#nypd_coords%>%
+#ggplot()+
+#  geom_point(aes(x=X1, y=X2,color = X3))+
+#  labs(color = "Murder")+
+#  ggtitle("Shooting Crimes across NYC")
+
+r <- GET('http://data.beta.nyc//dataset/0ff93d2d-90ba-457c-9f7e-39e47bf2ac5f/resource/35dd04fb-81b3-479b-a074-a27a37888ce7/download/d085e2f8d0b54d4590b1e7d1f35594c1pediacitiesnycneighborhoods.geojson')
+nyc_neighborhoods <- readOGR(content(r,'text'), 'OGRGeoJSON', verbose = F)
+nyc_neighborhoods_df <- tidy(nyc_neighborhoods)#load in our background map data and prepare it for ggplots
+
+ggplot() + 
+  geom_polygon(data=nyc_neighborhoods_df, aes(x=long, y=lat, group=group))+#create ggplot background map layer of NYC
+  geom_point(aes(x=nypd_coords$X1, y = nypd_coords$X2, color = nypd_coords$X3))+#plot our shooting incident points on the graph
+  labs(color = "Murder")+
+  ggtitle("Shooting Crimes across NYC")
+
+
+```
+
+The first visualization I produced was a map of crimes across New York City. This allows us to see where the most crimes happen. In blue, we see locations of murders while the red points show non murder shooting crimes. This map is really interesting showing us how shooting crimes are distributed throughout the city. We can see some differences by Neighborhood, with Staten Island having the least amount of shooting crimes. It appears that Northeast Brooklyn, Southern Queens, and the Bronx have the majority of shooting crimes. It would be interesting to explore these location based results with city information such as income and housing density. 
+
+
+### Age
+
+```{r}
+filter(nypd, VIC_AGE_GROUP != 1022) %>%#create a bargraph in ggplot for the number of victims in shootings by race group
+  ggplot()+
+  geom_bar(aes(x = VIC_AGE_GROUP), fill = "maroon")+
+  ggtitle("Distribution of Victim Ages")+
+  labs(y = "Frequency", x = "Victim Age")
+```
+In this visual above, we can see how the victims are generally younger and between the ages of 18-44. Logically, this could be due to younger people being out more often or certain activities they are engaged in. It's clear that as people age beyond 45, the frequency of shootings decreases vastly and there are very few shootings related to 65 year olds. 
+
+### Further Analysis on Victims
+
+This section will explore a breakdown of demographics related to the victims of these shootings and based on whether a murder occurred or not.
+```{r}
+#create a table for victim age group by shooting outcome
+prop.table(table(nypd[nypd$VIC_AGE_GROUP != 1022,]$STATISTICAL_MURDER_FLAG ,nypd[nypd$VIC_AGE_GROUP != 1022,]$VIC_AGE_GROUP), margin=1)
+
+```
+
+```{r}
+#create a table for victim race by shooting outcome
+
+prop.table(table(nypd$STATISTICAL_MURDER_FLAG ,nypd$VIC_RACE), margin=1)
+
+```
+```{r}
+#create a table for victim sex by shooting outcome
+
+prop.table(table(nypd$STATISTICAL_MURDER_FLAG ,nypd$VIC_SEX), margin=1)
+
+```
+Our analysis consists of three tables displaying the demographics of victims and based upon whether they were murdered in the shooting or not. From our tables, we can see that Males are much more likely to be victims of these crimes, along with Black victims and younger people. However, when we condition on whether the shooting results in death or not, we generally do not see any of the demographic proportions change. So while men are more likely to be shooting victims, the proportion of men compared to women does not vary based on whether the death occurred or not. The same is true for victim race and age. This analysis sheds more light on victim demographics and how these probabilities are impacted by the outcome of the shooting.
+
+### Time Analysis
+
+```{r}
+nypd_dates <- nypd %>% 
+  mutate(
+    newdate = format(OCCUR_DATE, "%Y-%m")
+  )# create a month data variable instead of by day
+
+date_count <- table(nypd_dates$newdate)#these two lines compile the frequency of crimes by month
+dates <- as.data.frame(date_count)
+
+
+dates%>%
+ggplot(aes(x = as.numeric(Var1), y = Freq))+#plot the number of crimes per month by time
+  geom_point(color = "blue")+
+  geom_smooth(method = "lm", se = FALSE, color = "red")+#include a trend line
+  ggtitle("Frequency of Crimes Over Time")
+```
+
+```{r}
+summary(lm(Freq~as.numeric(Var1), dates))#linear regression line analysis for results
+```
+
+This portion of the analysis examines the frequency of crimes by month over the span of this data set. Each month we compile the total number of shooting crimes and plot them over time. Now, we can examine the change in frequency of crimes over time and we do have supporting evidence that the number of crimes per month is actually decreasing over time (p <0.001). 
+
+### Bias
+
+This analysis looked at locations of crimes, status of victims, and the rate of crime over time which may all have biases built in. First off, data reporting can vary vastly in its accuracy and availability in different areas. For example, data reporting may be very dependent on where police are located within the city, which could bias the results based on certain neighborhoods having more police presence and therefore more reporting, skewing results from less served areas. This can alter data and create misleading conclusions based upon data quality that is coming in. Additionally, bias can be created with the types of analysis and data cleaning choices we make as analysts. In this case, missing data was mostly excluded, and if the missing data had a common reason it was not available, this could create analysis quality issues. It is important to keep in mind data quality issues and make sure I am making analysis choices that are from a central point of view and keep in mind my implicit biases when performing data analysis.
+
+Overall, this analysis looked at three main pieces in the data. First, we looked at the spread of crimes throughout NYC and saw that certain neighborhoods have significantly higher shooting rates, and even within neighborhoods, areas can have various rates of shooting incidents. We saw that Staten Island had the fewest shootings while certain areas in the Bronx, Queens, and Brooklyn had many occurrences of shooting crimes. Secondly, we looked at the demographics of victims in these shooting crimes, to conclude that most victims were African American, from younger age groups, and almost all victims being men. Lastly, I used a linear regression model to examine the number of crimes over time to find that shootings have decreased over the span of the data set, which is good news. 
+
+
+
+```{r}
+sessionInfo()
+```
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
